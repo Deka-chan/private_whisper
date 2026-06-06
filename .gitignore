@@ -1,0 +1,13 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Model files (downloaded at runtime, never committed)
+/models/
+*.onnx
+*.tar.bz2
+
+# OS / editor
+.DS_Store
+*.swp
