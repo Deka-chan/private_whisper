@@ -8,6 +8,9 @@ Cargo.lock
 *.onnx
 *.tar.bz2
 
+# Local CUDA runtime libs (pip wheels for dev GPU testing in WSL2)
+/.cudalibs/
+
 # OS / editor
 .DS_Store
 *.swp
