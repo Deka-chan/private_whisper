@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-parakeet-rs = { version = "0.3", features = ["cuda"] }
+parakeet-rs = { version = "0.3", default-features = false, features = ["cpu", "cuda", "load-dynamic"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
