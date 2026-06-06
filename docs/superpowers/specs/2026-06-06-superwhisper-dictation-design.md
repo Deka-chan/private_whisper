@@ -143,3 +143,38 @@ TRANSCRIBING:
 ## 13. Будущее (после v1)
 
 Кроссплатформенность (Linux: X11/Wayland вставка и хоткей; macOS: Accessibility + CoreML/CPU); TensorRT-бэкенд для максимума GPU; окно настроек; стриминг/частичные результаты; VAD; история; инсталлятор и подпись.
+
+## 14. Результаты спайка и финальный план GPU/рантайма (2026-06-07) — уточняет §6/§10/§11/§12
+
+Спайк выполнен на реальной RTX 5060 (Blackwell sm_120, WSL2). Всё проверено эмпирически.
+
+### 14.1 Подтверждённый движок и API
+- Тип модели — **`ParakeetTDT`** (мультиязык), не `Parakeet` (CTC english).
+- `ParakeetTDT::from_pretrained(dir, Some(ExecutionConfig::new().with_execution_provider(ExecutionProvider::Cuda)))`; затем `transcribe_samples(audio: Vec<f32>, rate: u32, channels: u16, Some(TimestampMode::Sentences)) -> TranscriptionResult { text, tokens }` (нужен `use parakeet_rs::Transcriber`). Встроенный CUDA→CPU фолбэк.
+
+### 14.2 Подтверждённый манифест fp16 (переименование под parakeet-rs)
+- `encoder-model.onnx` ← `grikdotnet/parakeet-tdt-0.6b-fp16` / `encoder-model.fp16.onnx` (1.24 ГБ)
+- `decoder_joint-model.onnx` ← grikdotnet / `decoder_joint-model.fp16.onnx` (36 МБ)
+- `vocab.txt` ← `istupakov/parakeet-tdt-0.6b-v3-onnx` (94 КБ)
+- Препроцессор/`config.json` не нужны (мел-фичи считаются в Rust).
+
+### 14.3 GPU на Blackwell — решение (подтверждено)
+- Дефолтный onnxruntime в `ort` rc.12 **не имеет ядер sm_120** → `cudaErrorNoKernelImageForDevice` (касается всей серии RTX 50, и Windows тоже).
+- **Решение (вариант C):** `parakeet-rs` с `features=["cpu","cuda","load-dynamic"]`; `ort` грузит onnxruntime в рантайме из `ORT_DYLIB_PATH`. Подкладываем **официальную сборку Microsoft onnxruntime-gpu 1.24.1 (CUDA-13, Blackwell)** из Azure-фида `onnxruntime-cuda-13` (wheel = zip, берём `.so`/`.dll`, версия Python неважна).
+- CUDA-13 рантайм + cuDNN 9 — pip-wheels NVIDIA (`--extra-index-url https://pypi.nvidia.com`): для cu13 имена математических либ **без суффикса** (`nvidia-cuda-runtime`, `nvidia-cublas`, `nvidia-curand`, `nvidia-cufft`), cuDNN — **`nvidia-cudnn-cu13`** (безсуффиксный `nvidia-cudnn` — древний 8.2!).
+- `ort-sys` rc.12 поддерживает ORT API ≤ 24 → совместимо с onnxruntime 1.24.
+
+### 14.4 Рантайм-провижининг и дистрибуция (финал)
+- Собираем **всегда с `load-dynamic`**. На первом запуске `model`/`runtime` модуль:
+  - GPU есть (NVIDIA Blackwell) → докачать GPU-рантайм (~2.0 ГБ: onnxruntime CUDA-13 250 МБ + cuDNN9 837 МБ + cublasLt 490 МБ + cuFFT 245 МБ + cuRAND 128 МБ + cublas/cudart ~53 МБ) → `ORT_DYLIB_PATH` на него → CUDA EP.
+  - Иначе → лёгкий CPU-onnxruntime (~15 МБ) → CPU EP.
+- Модель (1.24 ГБ) + GPU-рантайм (~2 ГБ) ⇒ первый запуск ~3.2 ГБ (одноразово). Сам exe лёгкий — тяжёлое тянется после установки. CPU-фолбэк при сбое GPU-инициализации.
+- На Windows — те же артефакты в варианте `win_amd64` (DLL) из того же MS-фида.
+
+### 14.5 Закрытие рисков §10
+- Риск #1 (sm_120): **решён** через 14.3 (проверено на железе).
+- Риск #2 (манифест): **решён** — см. 14.2.
+- Риск #3 (зрелость parakeet-rs): **закрыт** — end-to-end CPU и GPU работают.
+
+### 14.6 Дев-окружение (WSL2)
+RTX 5060 проброшена (`nvidia-smi`, драйвер 596.49, CUDA 13.2-capable). Rust 1.96 (rustup). Дев GPU-либы — в gitignore: `.ortgpu/` (MS onnxruntime), `.cudalibs13/` (CUDA13+cuDNN9), модель в `models/`. WSL libcuda — `/usr/lib/wsl/lib`.

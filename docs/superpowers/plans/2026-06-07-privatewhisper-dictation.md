@@ -12,6 +12,13 @@
 
 ---
 
+> **UPDATE 2026-06-07 — Phase 0 & 1 done; GPU approach finalized.** Scaffold built; the de-risk spike ran on the real RTX 5060. See **spec §14** for authoritative results. Key changes that override parts of this plan:
+> - **Engine API:** model type is `ParakeetTDT` (not `Parakeet`); `transcribe_samples(audio: Vec<f32>, rate, channels, Some(TimestampMode::Sentences))`, trait `parakeet_rs::Transcriber`.
+> - **Confirmed fp16 manifest:** `encoder-model.onnx` (grikdotnet `encoder-model.fp16.onnx`, 1.24 GB), `decoder_joint-model.onnx` (grikdotnet, 36 MB), `vocab.txt` (istupakov). No preprocessor/config.json.
+> - **GPU on Blackwell requires `load-dynamic`** + Microsoft onnxruntime-gpu 1.24.x CUDA-13 (Azure `onnxruntime-cuda-13` feed) + CUDA-13 runtime/cuDNN9. Default ort onnxruntime lacks sm_120 (`cudaErrorNoKernelImageForDevice`). Cargo.toml now uses `parakeet-rs = { default-features=false, features=["cpu","cuda","load-dynamic"] }`.
+> - **Phase 5 (model) expands to a `runtime` provisioner:** on first run download the model (1.24 GB) AND the right onnxruntime runtime — GPU (~2 GB) when a Blackwell NVIDIA GPU is present, else CPU onnxruntime (~15 MB) — then set `ORT_DYLIB_PATH`. **Phase 6 (asr)** uses load-dynamic (no static onnxruntime).
+> - Phases 2–4 below (Config, State machine, Audio conversion) are unaffected and implemented as written.
+
 ## File Structure
 
 ```
