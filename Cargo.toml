@@ -1,0 +1,30 @@
+[package]
+name = "privatewhisper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+parakeet-rs = { version = "0.3", default-features = false, features = ["cpu", "cuda"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "5"
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+tao = "0.30"
+tray-icon = "0.19"
+global-hotkey = "0.6"
+cpal = "0.15"
+arboard = "3"
+enigo = "0.2"
+
+[dev-dependencies]
+hound = "3"
+tempfile = "3"
+
+[[example]]
+name = "spike"
