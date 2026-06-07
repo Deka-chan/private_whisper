@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -39,8 +39,8 @@ impl Default for Config {
     }
 }
 
-use std::path::Path;
 use directories::ProjectDirs;
+use std::path::Path;
 
 impl Config {
     /// Standard config file location: %APPDATA%/privatewhisper/config.toml (or platform equiv).
@@ -116,7 +116,10 @@ mod tests {
     fn save_then_load_from_explicit_path() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let c = Config { paste_delay_ms: 200, ..Default::default() };
+        let c = Config {
+            paste_delay_ms: 200,
+            ..Default::default()
+        };
         c.save_to(&path).unwrap();
         let loaded = Config::load_from(&path).unwrap();
         assert_eq!(loaded.paste_delay_ms, 200);

@@ -40,39 +40,53 @@ mod tests {
 
     #[test]
     fn idle_hotkey_starts_recording() {
-        assert_eq!(transition(State::Idle, Event::HotkeyPressed),
-                   (State::Recording, Action::StartRecording));
+        assert_eq!(
+            transition(State::Idle, Event::HotkeyPressed),
+            (State::Recording, Action::StartRecording)
+        );
     }
 
     #[test]
     fn recording_hotkey_stops_and_transcribes() {
-        assert_eq!(transition(State::Recording, Event::HotkeyPressed),
-                   (State::Transcribing, Action::StopAndTranscribe));
+        assert_eq!(
+            transition(State::Recording, Event::HotkeyPressed),
+            (State::Transcribing, Action::StopAndTranscribe)
+        );
     }
 
     #[test]
     fn transcribing_done_returns_to_idle() {
-        assert_eq!(transition(State::Transcribing, Event::TranscriptionDone),
-                   (State::Idle, Action::None));
+        assert_eq!(
+            transition(State::Transcribing, Event::TranscriptionDone),
+            (State::Idle, Action::None)
+        );
     }
 
     #[test]
     fn transcribing_failed_returns_to_idle() {
-        assert_eq!(transition(State::Transcribing, Event::TranscriptionFailed),
-                   (State::Idle, Action::None));
+        assert_eq!(
+            transition(State::Transcribing, Event::TranscriptionFailed),
+            (State::Idle, Action::None)
+        );
     }
 
     #[test]
     fn hotkey_ignored_while_transcribing() {
-        assert_eq!(transition(State::Transcribing, Event::HotkeyPressed),
-                   (State::Transcribing, Action::None));
+        assert_eq!(
+            transition(State::Transcribing, Event::HotkeyPressed),
+            (State::Transcribing, Action::None)
+        );
     }
 
     #[test]
     fn stray_completion_events_are_noops() {
-        assert_eq!(transition(State::Idle, Event::TranscriptionDone),
-                   (State::Idle, Action::None));
-        assert_eq!(transition(State::Recording, Event::TranscriptionFailed),
-                   (State::Recording, Action::None));
+        assert_eq!(
+            transition(State::Idle, Event::TranscriptionDone),
+            (State::Idle, Action::None)
+        );
+        assert_eq!(
+            transition(State::Recording, Event::TranscriptionFailed),
+            (State::Recording, Action::None)
+        );
     }
 }
