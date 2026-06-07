@@ -12,6 +12,8 @@ Cargo.lock
 /.cudalibs/
 /.cudalibs13/
 /.ortgpu/
+/.winrt/
+/dist/
 
 # OS / editor
 .DS_Store
