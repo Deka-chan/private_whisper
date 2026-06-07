@@ -3,6 +3,11 @@ pub fn i16_to_f32(samples: &[i16]) -> Vec<f32> {
     samples.iter().map(|&s| s as f32 / 32768.0).collect()
 }
 
+/// Peak absolute amplitude of a block, clamped to [0.0, 1.0].
+pub fn block_peak(samples: &[f32]) -> f32 {
+    samples.iter().fold(0.0f32, |m, &s| m.max(s.abs())).min(1.0)
+}
+
 /// Down-mix interleaved multi-channel f32 to mono by averaging channels.
 pub fn to_mono_f32(interleaved: &[f32], channels: u16) -> Vec<f32> {
     let ch = channels.max(1) as usize;
@@ -45,7 +50,10 @@ pub fn resample_to_16k(samples: &[f32], from_rate: u32) -> Vec<f32> {
 }
 
 #[cfg(target_os = "windows")]
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc, Mutex,
+};
 
 #[cfg(target_os = "windows")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -65,7 +73,7 @@ pub struct Recorder {
 #[cfg(target_os = "windows")]
 impl Recorder {
     /// Start capturing. `device_name` selects an input by name; None = default.
-    pub fn start(device_name: Option<&str>) -> anyhow::Result<Recorder> {
+    pub fn start(device_name: Option<&str>, level: Arc<AtomicU32>) -> anyhow::Result<Recorder> {
         let host = cpal::default_host();
         let device = match device_name {
             Some(name) => host
@@ -85,35 +93,67 @@ impl Recorder {
 
         let stream = match config.sample_format() {
             cpal::SampleFormat::I8 => {
-                build_input_stream::<i8, _>(&device, &stream_config, buffer.clone(), err_fn)?
+                build_input_stream::<i8, _>(&device, &stream_config, buffer.clone(), level, err_fn)?
             }
-            cpal::SampleFormat::I16 => {
-                build_input_stream::<i16, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::I32 => {
-                build_input_stream::<i32, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::I64 => {
-                build_input_stream::<i64, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
+            cpal::SampleFormat::I16 => build_input_stream::<i16, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::I32 => build_input_stream::<i32, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::I64 => build_input_stream::<i64, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
             cpal::SampleFormat::U8 => {
-                build_input_stream::<u8, _>(&device, &stream_config, buffer.clone(), err_fn)?
+                build_input_stream::<u8, _>(&device, &stream_config, buffer.clone(), level, err_fn)?
             }
-            cpal::SampleFormat::U16 => {
-                build_input_stream::<u16, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::U32 => {
-                build_input_stream::<u32, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::U64 => {
-                build_input_stream::<u64, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::F32 => {
-                build_input_stream::<f32, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
-            cpal::SampleFormat::F64 => {
-                build_input_stream::<f64, _>(&device, &stream_config, buffer.clone(), err_fn)?
-            }
+            cpal::SampleFormat::U16 => build_input_stream::<u16, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::U32 => build_input_stream::<u32, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::U64 => build_input_stream::<u64, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::F32 => build_input_stream::<f32, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
+            cpal::SampleFormat::F64 => build_input_stream::<f64, _>(
+                &device,
+                &stream_config,
+                buffer.clone(),
+                level,
+                err_fn,
+            )?,
             sample_format => anyhow::bail!("unsupported input sample format '{sample_format}'"),
         };
         stream.play()?;
@@ -141,6 +181,7 @@ fn build_input_stream<T, E>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     buffer: Arc<Mutex<Vec<f32>>>,
+    level: Arc<AtomicU32>,
     err_fn: E,
 ) -> Result<cpal::Stream, cpal::BuildStreamError>
 where
@@ -151,10 +192,13 @@ where
     device.build_input_stream(
         config,
         move |data: &[T], _| {
-            buffer
-                .lock()
-                .unwrap()
-                .extend(data.iter().map(|&sample| sample.to_sample::<f32>()));
+            let converted: Vec<f32> = data
+                .iter()
+                .map(|&sample| sample.to_sample::<f32>())
+                .collect();
+            let peak = block_peak(&converted);
+            level.store(peak.to_bits(), Ordering::Relaxed);
+            buffer.lock().unwrap().extend(converted);
         },
         err_fn,
         None,
@@ -171,6 +215,13 @@ mod tests {
         assert!((out[0] - 0.0).abs() < 1e-6);
         assert!((out[1] - 0.5).abs() < 1e-3);
         assert!((out[2] + 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn block_peak_returns_peak_absolute_amplitude_clamped_to_unit_range() {
+        assert_eq!(block_peak(&[0.0, -0.5, 0.25]), 0.5);
+        assert_eq!(block_peak(&[]), 0.0);
+        assert_eq!(block_peak(&[-1.25, 0.75]), 1.0);
     }
 
     #[test]

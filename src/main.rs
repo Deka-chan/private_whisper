@@ -33,8 +33,12 @@ mod windows_app {
     use std::{
         path::{Path, PathBuf},
         process::Command,
-        sync::mpsc,
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            mpsc, Arc,
+        },
         thread,
+        time::{Duration, Instant},
     };
 
     use global_hotkey::{hotkey::HotKey, GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
@@ -140,7 +144,8 @@ mod windows_app {
         log::info!("registered global hotkey {}", hotkey);
 
         let tray = tray::build()?;
-        let mut overlay = Overlay::new(&event_loop)?;
+        let level = Arc::new(AtomicU32::new(0));
+        let mut overlay = Overlay::new(&event_loop, level.clone())?;
         let (job_tx, job_rx) = mpsc::channel();
         spawn_transcription_worker(asr, config.paste_delay_ms, proxy.clone(), job_rx);
 
@@ -150,11 +155,14 @@ mod windows_app {
         let mut recorder: Option<Recorder> = None;
 
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Wait;
+            let mut exit = false;
 
             match event {
                 Event::NewEvents(StartCause::Init) => {
                     update_tray(&tray, state);
+                }
+                Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
+                    overlay.tick();
                 }
                 Event::UserEvent(UiEvent::Hotkey(event)) => {
                     if event.id == hotkey.id() && matches!(event.state(), HotKeyState::Pressed) {
@@ -162,6 +170,7 @@ mod windows_app {
                             &mut state,
                             &mut recorder,
                             input_device.as_deref(),
+                            &level,
                             &job_tx,
                             &tray,
                         );
@@ -186,7 +195,7 @@ mod windows_app {
                 }
                 Event::UserEvent(UiEvent::Menu(event)) => {
                     if event.id == tray.quit_id {
-                        *control_flow = ControlFlow::Exit;
+                        exit = true;
                     } else if event.id == tray.open_config_id {
                         if let Err(err) = open_path(&config_path) {
                             log::error!("failed to open config {}: {err}", config_path.display());
@@ -212,6 +221,14 @@ mod windows_app {
             }
 
             let _keep_hotkey_manager_alive = &hotkeys;
+
+            *control_flow = if exit {
+                ControlFlow::Exit
+            } else if overlay.is_active() {
+                ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(33))
+            } else {
+                ControlFlow::Wait
+            };
         });
     }
 
@@ -245,6 +262,7 @@ mod windows_app {
         state: &mut State,
         recorder: &mut Option<Recorder>,
         input_device: Option<&str>,
+        level: &Arc<AtomicU32>,
         job_tx: &mpsc::Sender<TranscriptionJob>,
         tray: &tray::Tray,
     ) {
@@ -255,17 +273,19 @@ mod windows_app {
 
         match action {
             Action::None => {}
-            Action::StartRecording => match Recorder::start(input_device) {
+            Action::StartRecording => match Recorder::start(input_device, level.clone()) {
                 Ok(active) => {
                     *recorder = Some(active);
                 }
                 Err(err) => {
                     log::error!("failed to start recording: {err}");
+                    level.store(0f32.to_bits(), Ordering::Relaxed);
                     *state = previous;
                     update_tray(tray, *state);
                 }
             },
             Action::StopAndTranscribe => {
+                level.store(0f32.to_bits(), Ordering::Relaxed);
                 if let Some(active) = recorder.take() {
                     let (samples, sample_rate) = active.stop();
                     if let Err(err) = job_tx.send(TranscriptionJob {
@@ -278,6 +298,7 @@ mod windows_app {
                     }
                 } else {
                     log::warn!("hotkey requested transcription without an active recorder");
+                    level.store(0f32.to_bits(), Ordering::Relaxed);
                     *state = previous;
                     update_tray(tray, *state);
                 }
