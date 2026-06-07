@@ -16,6 +16,13 @@ pub struct Config {
     pub input_device: Option<String>,
     pub paste_delay_ms: u64,
     pub model_dir: Option<PathBuf>,
+    /// Path to the ONNX Runtime dynamic library (load-dynamic). If unset, falls
+    /// back to the `ORT_DYLIB_PATH` env var. Required until GPU-runtime
+    /// auto-provisioning lands.
+    pub ort_dylib_path: Option<PathBuf>,
+    /// Directory holding the ONNX Runtime provider + CUDA libs, added to the
+    /// library search path at startup (Windows DLL dir / used by the loader).
+    pub ort_lib_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -26,6 +33,8 @@ impl Default for Config {
             input_device: None,
             paste_delay_ms: 80,
             model_dir: None,
+            ort_dylib_path: None,
+            ort_lib_dir: None,
         }
     }
 }
@@ -88,6 +97,8 @@ mod tests {
             input_device: Some("Mic".into()),
             paste_delay_ms: 120,
             model_dir: None,
+            ort_dylib_path: None,
+            ort_lib_dir: None,
         };
         let s = toml::to_string(&c).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
