@@ -30,9 +30,15 @@ pub fn paste(text: &str, delay_ms: u64) -> anyhow::Result<()> {
 
     clip.set_text(text)?;
 
+    // Use the V *virtual-key code* (VK_V = 0x56), not Key::Unicode('v').
+    // Key::Unicode translates the char through the ACTIVE keyboard layout via
+    // VkKeyScanW; with a non-Latin layout active (e.g. Russian) 'v' maps to -1
+    // and enigo errors ("key state could not be converted to u32"). Key::Other
+    // is sent as a raw VIRTUAL_KEY, so Ctrl+V works regardless of layout.
+    const VK_V: u32 = 0x56;
     let mut enigo = Enigo::new(&Settings::default())?;
     enigo.key(Key::Control, Direction::Press)?;
-    enigo.key(Key::Unicode('v'), Direction::Click)?;
+    enigo.key(Key::Other(VK_V), Direction::Click)?;
     enigo.key(Key::Control, Direction::Release)?;
 
     thread::sleep(Duration::from_millis(delay_ms));
