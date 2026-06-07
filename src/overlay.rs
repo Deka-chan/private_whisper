@@ -53,7 +53,10 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    pub fn new<T>(target: &EventLoopWindowTarget<T>, level: Arc<AtomicU32>) -> anyhow::Result<Self> {
+    pub fn new<T>(
+        target: &EventLoopWindowTarget<T>,
+        level: Arc<AtomicU32>,
+    ) -> anyhow::Result<Self> {
         let window = Rc::new(
             WindowBuilder::new()
                 .with_title("privatewhisper-overlay")
