@@ -19,9 +19,6 @@ pub fn to_mono_f32(interleaved: &[f32], channels: u16) -> Vec<f32> {
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
-use cpal::Sample;
-
-#[cfg(target_os = "windows")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 /// Captures the default input device into a shared buffer until stopped.
