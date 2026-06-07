@@ -73,7 +73,7 @@ mod windows_app {
 
     pub fn run() -> anyhow::Result<()> {
         let config = Config::load_or_create()?;
-        configure_onnx_runtime(&config);
+        ensure_runtime_env(&config)?;
 
         let model_dir = config.model_dir.clone().unwrap_or_else(default_model_dir);
         ensure_model(&model_dir)?;
@@ -84,19 +84,42 @@ mod windows_app {
         run_event_loop(config, model_dir, asr)
     }
 
-    fn configure_onnx_runtime(config: &Config) {
+    fn ensure_runtime_env(config: &Config) -> anyhow::Result<()> {
+        // 1) Explicit override in config wins.
         if let Some(path) = &config.ort_dylib_path {
             std::env::set_var("ORT_DYLIB_PATH", path);
-            log::info!("ORT_DYLIB_PATH={}", path.display());
+            if let Some(dir) = &config.ort_lib_dir {
+                prepend_path_env(dir);
+            } else if let Some(dir) = path.parent() {
+                prepend_path_env(dir);
+            }
+            return Ok(());
         }
 
-        if let Some(dir) = &config.ort_lib_dir {
-            prepend_path_env(dir);
-            log::info!(
-                "prepended ONNX Runtime DLL directory to PATH: {}",
-                dir.display()
-            );
+        // 2) Already provided via the environment (e.g. a bundled run.bat that sets
+        //    ORT_DYLIB_PATH next to the exe). Respect it; just make sure its dir is on PATH.
+        if let Ok(existing) = std::env::var("ORT_DYLIB_PATH") {
+            if let Some(dir) = std::path::Path::new(&existing).parent() {
+                prepend_path_env(dir);
+            }
+            return Ok(());
         }
+
+        // 3) Auto-provision: download the GPU runtime to %LOCALAPPDATA%/privatewhisper/runtime.
+        let runtime_dir = directories::BaseDirs::new()
+            .map(|d| d.data_local_dir().join("privatewhisper").join("runtime"))
+            .unwrap_or_else(|| std::path::PathBuf::from("./runtime"));
+        log::info!(
+            "provisioning GPU runtime into {} (first run downloads ~1.2 GB) ...",
+            runtime_dir.display()
+        );
+        let dylib = privatewhisper::runtime::ensure(&runtime_dir, &mut |i, n, done, total| {
+            log::info!("runtime wheel {}/{}: {}/{} bytes", i + 1, n, done, total);
+        })?;
+        std::env::set_var("ORT_DYLIB_PATH", &dylib);
+        prepend_path_env(&runtime_dir);
+        log::info!("ORT_DYLIB_PATH={}", dylib.display());
+        Ok(())
     }
 
     fn prepend_path_env(dir: &Path) {

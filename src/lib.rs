@@ -4,6 +4,7 @@ pub mod audio;
 pub mod config;
 pub mod inject;
 pub mod model;
+pub mod runtime;
 
 #[cfg(target_os = "windows")]
 pub mod overlay;
