@@ -15,6 +15,35 @@ pub fn to_mono_f32(interleaved: &[f32], channels: u16) -> Vec<f32> {
         .collect()
 }
 
+/// Resample mono f32 audio to 16 kHz — the rate Parakeet requires (it does not
+/// resample internally and errors on any other rate).
+///
+/// Passthrough when already 16 kHz. For downsampling (the common mic case, e.g.
+/// 48 kHz → 16 kHz) each output sample is the average of the source window it
+/// covers, giving basic anti-aliasing; for upsampling it falls back to
+/// nearest-source sampling.
+pub fn resample_to_16k(samples: &[f32], from_rate: u32) -> Vec<f32> {
+    const TARGET: u32 = 16_000;
+    if samples.is_empty() || from_rate == TARGET {
+        return samples.to_vec();
+    }
+    let out_len = (samples.len() as u64 * TARGET as u64 / from_rate as u64) as usize;
+    if out_len == 0 {
+        return Vec::new();
+    }
+    let step = from_rate as f64 / TARGET as f64; // source samples per output sample
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let start = (i as f64 * step) as usize;
+        let end = (((i + 1) as f64 * step).ceil() as usize)
+            .min(samples.len())
+            .max(start + 1);
+        let window = &samples[start..end];
+        out.push(window.iter().copied().sum::<f32>() / window.len() as f32);
+    }
+    out
+}
+
 #[cfg(target_os = "windows")]
 use std::sync::{Arc, Mutex};
 
@@ -97,11 +126,13 @@ impl Recorder {
         })
     }
 
-    /// Stop and return (mono f32 samples, sample_rate).
+    /// Stop and return (16 kHz mono f32 samples, 16000). Audio is down-mixed to
+    /// mono and resampled to 16 kHz, which is the only rate Parakeet accepts.
     pub fn stop(self) -> (Vec<f32>, u32) {
         drop(self.stream);
         let interleaved = self.buffer.lock().unwrap().clone();
-        (to_mono_f32(&interleaved, self.channels), self.sample_rate)
+        let mono = to_mono_f32(&interleaved, self.channels);
+        (resample_to_16k(&mono, self.sample_rate), 16_000)
     }
 }
 
@@ -153,5 +184,27 @@ mod tests {
     fn mono_passthrough() {
         let out = to_mono_f32(&[0.1, 0.2, 0.3], 1);
         assert_eq!(out, vec![0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn resample_passthrough_at_16k() {
+        let s = vec![0.1, 0.2, 0.3];
+        assert_eq!(resample_to_16k(&s, 16_000), s);
+    }
+
+    #[test]
+    fn resample_empty_is_empty() {
+        assert!(resample_to_16k(&[], 48_000).is_empty());
+    }
+
+    #[test]
+    fn resample_48k_to_16k_thirds_length_and_preserves_dc() {
+        // constant 0.5 signal: 9 samples @ 48k -> 3 samples @ 16k, still 0.5
+        let s = vec![0.5f32; 9];
+        let out = resample_to_16k(&s, 48_000);
+        assert_eq!(out.len(), 3);
+        for v in out {
+            assert!((v - 0.5).abs() < 1e-6);
+        }
     }
 }
