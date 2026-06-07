@@ -24,12 +24,12 @@ use windows_sys::Win32::{
     },
 };
 
-const WIDTH: f64 = 360.0;
-const HEIGHT: f64 = 72.0;
-const BOTTOM_OFFSET: i32 = 90;
-const BAR_COUNT: usize = 24;
-const BACKGROUND: u32 = 0x0011_1114; // near-black pill
-const TRACK: u32 = 0x002E_2E36; // dim resting color
+const WIDTH: f64 = 300.0;
+const HEIGHT: f64 = 54.0;
+const BOTTOM_OFFSET: i32 = 96;
+const BAR_COUNT: usize = 46;
+const BACKGROUND: u32 = 0x0012_1216; // near-black pill
+const TRACK: u32 = 0x002C_2C34; // dim baseline color
 const RECORDING_ACCENT: u32 = 0x00EA_EAF2; // soft white
 const TRANSCRIBING_ACCENT: u32 = 0x006A_A0FF; // soft blue
 
@@ -44,7 +44,10 @@ pub struct Overlay {
     window: Rc<Window>,
     surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
     level: Arc<AtomicU32>,
-    bars: Vec<f32>,
+    /// Captured amplitude history: index 0 is oldest (left), last is newest (right).
+    /// Each value is a frozen moment that scrolls left over time — a little slice
+    /// of the recorded waveform, not a live "in the moment" equalizer.
+    history: Vec<f32>,
     mode: Mode,
     frame: u64,
 }
@@ -76,7 +79,7 @@ impl Overlay {
             window,
             surface,
             level,
-            bars: vec![0.0; BAR_COUNT],
+            history: vec![0.0; BAR_COUNT],
             mode: Mode::Idle,
             frame: 0,
         })
@@ -95,6 +98,10 @@ impl Overlay {
         match state {
             crate::app::State::Idle => {
                 self.mode = Mode::Idle;
+                // Reset the trace so the next recording starts from a clean line.
+                for v in &mut self.history {
+                    *v = 0.0;
+                }
                 unsafe {
                     ShowWindow(hwnd, SW_HIDE);
                 }
@@ -116,14 +123,13 @@ impl Overlay {
         }
     }
 
-    /// Advance one animation frame: turn the mic level (or a synthetic pulse) into
-    /// a lively per-bar target and ease each bar toward it.
+    /// Capture the current amplitude as one new sample on the right and scroll the
+    /// whole history left — a moving slice of the recorded waveform.
     pub fn tick(&mut self) {
         self.frame = self.frame.saturating_add(1);
         let f = self.frame as f32;
 
-        // Overall amplitude in [0,1].
-        let amp = match self.mode {
+        let sample = match self.mode {
             Mode::Idle => 0.0,
             Mode::Recording => {
                 // Mic peaks for speech are small; boost + soft curve so quiet
@@ -131,19 +137,16 @@ impl Overlay {
                 let peak = f32::from_bits(self.level.load(Ordering::Relaxed)).clamp(0.0, 1.0);
                 (peak * 6.5).powf(0.7).clamp(0.0, 1.0)
             }
-            Mode::Transcribing => 0.34 + 0.12 * (f * 0.16).sin(),
+            // No live audio while transcribing — scroll a gentle synthetic wave so
+            // the trace keeps moving and reads as "working".
+            Mode::Transcribing => (0.30 + 0.16 * (f * 0.45).sin()).clamp(0.0, 1.0),
         };
 
-        let center = (BAR_COUNT - 1) as f32 / 2.0;
-        for (i, bar) in self.bars.iter_mut().enumerate() {
-            // Bell-ish envelope: taller in the middle, shorter at the edges.
-            let dist = (i as f32 - center).abs() / center.max(1.0);
-            let shape = 1.0 - 0.5 * dist;
-            // Per-bar oscillation so neighbouring bars move independently.
-            let osc = 0.5 + 0.5 * (f * 0.35 + i as f32 * 1.9).sin();
-            let target = (amp * shape * osc).clamp(0.0, 1.0);
-            // Ease toward the target for fluid motion (no jumps).
-            *bar += (target - *bar) * 0.4;
+        if !self.history.is_empty() {
+            self.history.rotate_left(1);
+            if let Some(last) = self.history.last_mut() {
+                *last = sample;
+            }
         }
 
         self.window.request_redraw();
@@ -180,7 +183,7 @@ impl Overlay {
             .buffer_mut()
             .map_err(|e| anyhow::anyhow!("softbuffer: {e}"))?;
         buffer.fill(BACKGROUND);
-        draw_bars(&mut buffer, width_px, height_px, &self.bars, accent);
+        draw_history(&mut buffer, width_px, height_px, &self.history, accent);
         buffer
             .present()
             .map_err(|e| anyhow::anyhow!("softbuffer: {e}"))?;
@@ -189,26 +192,30 @@ impl Overlay {
     }
 }
 
-/// Draw thin, vertically-mirrored bars. Each bar's height and brightness scale
-/// with its magnitude: a dim short stub at rest, a tall bright bar when loud.
-fn draw_bars(buffer: &mut [u32], width: usize, height: usize, bars: &[f32], accent: u32) {
-    if width == 0 || height == 0 || bars.is_empty() {
+/// Draw the captured history as thin, vertically-mirrored bars. Older samples
+/// (left) fade out so the trace looks like it is scrolling away.
+fn draw_history(buffer: &mut [u32], width: usize, height: usize, history: &[f32], accent: u32) {
+    if width == 0 || height == 0 || history.is_empty() {
         return;
     }
-    let n = bars.len();
+    let n = history.len();
     let pitch = width as f32 / n as f32;
-    let bar_w = (pitch * 0.42).round().clamp(2.0, 7.0) as usize;
+    let bar_w = (pitch * 0.55).round().clamp(2.0, 4.0) as usize;
     let cy = height / 2;
-    let max_h = height.saturating_sub(12).max(4);
-    let min_h = bar_w.max(3); // resting stub ~ a dot
+    let max_h = height.saturating_sub(8).max(4);
+    let min_h = 2usize;
+    let denom = (n - 1).max(1) as f32;
 
-    for (i, &mag) in bars.iter().enumerate() {
+    for (i, &mag) in history.iter().enumerate() {
         let mag = mag.clamp(0.0, 1.0);
         let cx = ((i as f32 + 0.5) * pitch).round() as isize;
         let x0 = (cx - bar_w as isize / 2).max(0) as usize;
         let x1 = (x0 + bar_w).min(width);
+
         let h = min_h + ((max_h.saturating_sub(min_h)) as f32 * mag).round() as usize;
-        let color = lerp_color(TRACK, accent, mag.powf(0.7));
+        // Brightness from amplitude, then a left-to-right fade for the scroll feel.
+        let fade = 0.32 + 0.68 * (i as f32 / denom);
+        let color = scale_color(lerp_color(TRACK, accent, mag.powf(0.7)), fade);
 
         let half = h / 2;
         let y0 = cy.saturating_sub(half);
@@ -232,6 +239,15 @@ fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
     let r = lerp((a >> 16) & 0xff, (b >> 16) & 0xff);
     let g = lerp((a >> 8) & 0xff, (b >> 8) & 0xff);
     let bl = lerp(a & 0xff, b & 0xff);
+    (r << 16) | (g << 8) | bl
+}
+
+fn scale_color(c: u32, factor: f32) -> u32 {
+    let factor = factor.clamp(0.0, 1.0);
+    let scale = |x: u32| -> u32 { ((x as f32) * factor).round() as u32 };
+    let r = scale((c >> 16) & 0xff);
+    let g = scale((c >> 8) & 0xff);
+    let bl = scale(c & 0xff);
     (r << 16) | (g << 8) | bl
 }
 
