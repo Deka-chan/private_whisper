@@ -1,7 +1,6 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # Model files (downloaded at runtime, never committed)
 /models/
@@ -18,3 +17,6 @@ Cargo.lock
 # OS / editor
 .DS_Store
 *.swp
+
+# Stray screenshots / scratch images (commit real assets with -f if needed)
+*.png
