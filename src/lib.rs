@@ -6,4 +6,7 @@ pub mod inject;
 pub mod model;
 
 #[cfg(target_os = "windows")]
+pub mod overlay;
+
+#[cfg(target_os = "windows")]
 pub mod tray;

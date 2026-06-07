@@ -43,7 +43,9 @@ mod windows_app {
         asr::Asr,
         audio::Recorder,
         config::Config,
-        inject, model, tray,
+        inject, model,
+        overlay::Overlay,
+        tray,
     };
     use tao::{
         event::{Event, StartCause},
@@ -138,6 +140,7 @@ mod windows_app {
         log::info!("registered global hotkey {}", hotkey);
 
         let tray = tray::build()?;
+        let mut overlay = Overlay::new(&event_loop)?;
         let (job_tx, job_rx) = mpsc::channel();
         spawn_transcription_worker(asr, config.paste_delay_ms, proxy.clone(), job_rx);
 
@@ -162,6 +165,7 @@ mod windows_app {
                             &job_tx,
                             &tray,
                         );
+                        overlay.set_state(state);
                     }
                 }
                 Event::UserEvent(UiEvent::Transcribed(text)) => {
@@ -170,6 +174,7 @@ mod windows_app {
                     state = next;
                     log_unexpected_action(action);
                     update_tray(&tray, state);
+                    overlay.set_state(state);
                 }
                 Event::UserEvent(UiEvent::Failed(error)) => {
                     log::error!("transcription failed: {error}");
@@ -177,6 +182,7 @@ mod windows_app {
                     state = next;
                     log_unexpected_action(action);
                     update_tray(&tray, state);
+                    overlay.set_state(state);
                 }
                 Event::UserEvent(UiEvent::Menu(event)) => {
                     if event.id == tray.quit_id {
@@ -198,6 +204,9 @@ mod windows_app {
                             "provider toggle clicked; runtime provider changes require restart"
                         );
                     }
+                }
+                Event::RedrawRequested(window_id) if window_id == overlay.id() => {
+                    overlay.redraw();
                 }
                 _ => {}
             }

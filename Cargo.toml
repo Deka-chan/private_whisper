@@ -21,6 +21,8 @@ global-hotkey = "0.6"
 cpal = "0.15"
 arboard = "3"
 enigo = "0.2"
+softbuffer = "0.4"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 hound = "3"
