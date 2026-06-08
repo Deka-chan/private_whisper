@@ -8,6 +8,21 @@ A lightweight Rust app: a global hotkey, a tray icon, and a live waveform overla
 
 ---
 
+## Download
+
+Grab the latest build from the [**Releases**](../../releases/latest) page:
+
+- **Windows** — `PrivateWhisper-lite-win-x64.zip` (the ~26 MB lite exe; downloads the model + GPU runtime on first run). See [Install & run](#install--run).
+- **macOS (Apple Silicon)** — `PrivateWhisper-macOS-arm64.zip`. The `.app` is **ad-hoc signed**, so Gatekeeper will block it on first launch. Clear the quarantine flag once after unzipping:
+
+  ```bash
+  xattr -dr com.apple.quarantine PrivateWhisper.app
+  ```
+
+  …or right-click the app → **Open** → **Open**. Then grant **Microphone** and **Accessibility** permissions when prompted. See [`macos/README.md`](macos/README.md) for details.
+
+---
+
 ## Features
 
 - 🔒 **Fully local** — audio and text never leave your computer.
