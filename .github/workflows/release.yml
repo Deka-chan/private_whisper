@@ -19,7 +19,9 @@ jobs:
         run: swift --version
       - name: Core tests
         working-directory: macos
-        run: swift test --filter PrivateWhisperCoreTests
+        # release config so the next step (make_app.sh release) reuses this build
+        # cache and the heavy WhisperKit dependency compiles at most once.
+        run: swift test -c release --filter PrivateWhisperCoreTests
       - name: Build .app (ad-hoc signed)
         working-directory: macos
         run: ./scripts/make_app.sh release
