@@ -12,9 +12,17 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Select latest stable Xcode (Swift 6+)
+        # Runners default to an older Xcode; swift-argument-parser (pulled by
+        # WhisperKit) needs Swift tools 6.0+. Export DEVELOPER_DIR so both
+        # `swift test` and make_app.sh (which hardcodes a default path) pick it up.
+        run: |
+          XC="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          echo "Selected Xcode: $XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
       - name: Swift version
         run: swift --version
       - name: Core tests
