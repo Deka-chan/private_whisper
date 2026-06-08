@@ -4,6 +4,8 @@
 
 A lightweight Rust app: a global hotkey, a tray icon, and a live waveform overlay. The ~25 MB executable downloads the model and the GPU runtime itself on first run.
 
+> 🍎 **macOS:** an Apple Silicon adaptation lives in [`macos/`](macos/) — a native Swift menu‑bar app using WhisperKit (CoreML / Neural Engine) with Whisper large‑v3‑turbo. Same idea (hotkey, overlay, fully local), Apple‑native stack.
+
 ---
 
 ## Features
