@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Core tests
+        working-directory: macos
+        run: swift test --filter PrivateWhisperCoreTests
+      - name: Build .app (ad-hoc signed)
+        working-directory: macos
+        run: ./scripts/make_app.sh release
+      - name: Zip .app
+        working-directory: macos/build
+        run: ditto -c -k --keepParent PrivateWhisper.app "$GITHUB_WORKSPACE/PrivateWhisper-macOS-arm64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrivateWhisper-macOS-arm64
+          path: PrivateWhisper-macOS-arm64.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build (release, lite exe)
+        run: cargo build --release
+      - name: Assemble lite package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging\privatewhisper-lite | Out-Null
+          Copy-Item target\release\privatewhisper.exe staging\privatewhisper-lite\
+          Copy-Item packaging\win\run.bat             staging\privatewhisper-lite\
+          Copy-Item packaging\win\README.txt          staging\privatewhisper-lite\
+          Compress-Archive -Path staging\privatewhisper-lite -DestinationPath PrivateWhisper-lite-win-x64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrivateWhisper-lite-win-x64
+          path: PrivateWhisper-lite-win-x64.zip
+          if-no-files-found: error
+
+  release:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
